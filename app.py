@@ -197,7 +197,7 @@ def online_price_search(product_name):
         if host == "emalls.ir" and any(part in path for part in ("/search", "/category", "/browse")):
             return
         seen.add(url)
-        match = re.search(r"([0-9۰-۹٠-٩][0-9۰-۹٠-٩,٬.\\s]{1,18})\\s*(تومان|تومن|ریال)", title + " " + snippet, re.IGNORECASE)
+        match = re.search(r"([0-9۰-۹٠-٩][0-9۰-۹٠-٩,٬.\s]{1,18})\s*(تومان|تومن|ریال)", title + " " + snippet, re.IGNORECASE)
         price = None
         if match:
             digits = re.sub(r"[^0-9۰-۹٠-٩]", "", match.group(1))
@@ -417,7 +417,7 @@ def product_reply(query):
                 lines.append(f"  {item['snippet']}")
             lines.append(f"  لینک: {item['url']}")
     lines.append("\n⚠️ قیمت آنلاین ممکن است قدیمی یا مربوط به مدل متفاوت باشد. پیش از خرید صفحه فروشنده را بررسی کنید. قیمت و موجودی اکسل تغییر نمی‌کند و هیچ مقدار نامشخصی حدس زده نمی‌شود.")
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def download_telegram_file(file_id):
