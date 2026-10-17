@@ -202,7 +202,7 @@ def online_price_search(product_name):
         from urllib.parse import urljoin
         torob_response = requests.get(
             "https://api.torob.com/v4/base-product/search/",
-            params={"q": product_name, "page": 0, "size": 10, "sort": "popularity", "source": "next_desktop"},
+            params={"q": product_name, "query": product_name, "page": 0, "size": 10, "sort": "popularity", "source": "torob_search"},
             headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json, text/plain, */*"},
             timeout=12,
         )
