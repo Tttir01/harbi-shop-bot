@@ -164,6 +164,79 @@ def format_value(value):
     return f"{value:,}" if isinstance(value, (int, float)) else str(value)
 
 
+
+def online_price_search(product_name):
+    """Search public Iranian retail listings; never infer a price from missing data."""
+    from html import unescape
+    from html.parser import HTMLParser
+
+    class ResultParser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.results = []
+            self.current = None
+            self.capture = None
+
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            classes = attrs.get("class", "").split()
+            if tag == "a" and "result__a" in classes:
+                self.current = {"title": "", "url": attrs.get("href", ""), "snippet": ""}
+                self.capture = "title"
+            elif self.current is not None and tag in ("a", "div", "span") and "result__snippet" in classes:
+                self.capture = "snippet"
+
+        def handle_data(self, data):
+            if self.current is not None and self.capture in ("title", "snippet"):
+                key = self.capture
+                self.current[key] = (self.current.get(key, "") + " " + data).strip()
+
+        def handle_endtag(self, tag):
+            if tag == "a" and self.capture == "title" and self.current is not None:
+                self.results.append(self.current)
+                self.current = None
+                self.capture = None
+            elif tag in ("div", "span") and self.capture == "snippet":
+                self.capture = None
+
+    query = f'"{product_name}" قیمت تومان (site:torob.com OR site:emalls.ir OR site:digikala.com)'
+    try:
+        response = requests.get(
+            "https://html.duckduckgo.com/html/",
+            params={"q": query},
+            headers={"User-Agent": "Mozilla/5.0 (compatible; HarbiShopPriceLookup/1.0)"},
+            timeout=8,
+        )
+        response.raise_for_status()
+        parser = ResultParser()
+        parser.feed(response.text)
+        results = []
+        seen = set()
+        for item in parser.results:
+            url = unescape(item.get("url", "")).strip()
+            title = unescape(item.get("title", "")).strip()
+            snippet = unescape(item.get("snippet", "")).strip()
+            if not url or not title or url in seen:
+                continue
+            seen.add(url)
+            if not any(domain in url.lower() for domain in ("torob.com", "emalls.ir", "digikala.com")):
+                continue
+            match = re.search(r"([0-9۰-۹٠-٩][0-9۰-۹٠-٩,٬.\s]{1,18})\s*(تومان|تومن|ریال)", f"{title} {snippet}", re.IGNORECASE)
+            price = None
+            if match:
+                digits = re.sub(r"[^0-9۰-۹٠-٩]", "", match.group(1))
+                digits = digits.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
+                if digits:
+                    price = (digits, match.group(2))
+            results.append({"title": title[:180], "url": url, "snippet": snippet[:220], "price": price})
+            if len(results) >= 3:
+                break
+        return results
+    except (requests.RequestException, ValueError) as exc:
+        log.info("Online price search unavailable: %s", exc)
+        return None
+
+
 def product_reply(query):
     if not PRODUCTS:
         return (
@@ -197,8 +270,24 @@ def product_reply(query):
     lines.append(f"موجودی ثبت‌شده: {format_value(p['stock'])}" + (f" {p['unit']}" if p['stock'] is not None and p['unit'] is not None else ""))
     if p["buy_price"] is not None:
         lines.append(f"قیمت خرید ثبت‌شده: {format_value(p['buy_price'])} تومان")
-    lines.append("\n⚠️ اطلاعات خالی در فایل، حدس زده نمی‌شود. قیمت وب‌سایت‌ها هنوز به‌صورت خودکار استعلام نمی‌شود.")
-    return "\n".join(lines)
+    lines.append("\\n🌐 بررسی قیمت آنلاین از فروشگاه‌های ایرانی:")
+    online = online_price_search(p["name"])
+    if online is None:
+        lines.append("جست‌وجوی وب در دسترس نیست؛ قیمت آنلاین نامشخص است.")
+    elif not online:
+        lines.append("نتیجه قابل استفاده‌ای پیدا نشد؛ قیمت آنلاین نامشخص است.")
+    else:
+        for item in online:
+            lines.append(f"• {item['title']}")
+            if item["price"]:
+                lines.append(f"  قیمت درج‌شده در نتیجه جست‌وجو: {format_value(int(item['price'][0]))} {item['price'][1]} (نیازمند تأیید در صفحه فروشنده)")
+            else:
+                lines.append("  قیمت قابل تأیید از متن نتیجه پیدا نشد.")
+            if item["snippet"]:
+                lines.append(f"  {item['snippet']}")
+            lines.append(f"  لینک: {item['url']}")
+    lines.append("\\n⚠️ قیمت آنلاین ممکن است قدیمی یا مربوط به مدل متفاوت باشد. پیش از خرید صفحه فروشنده را بررسی کنید. قیمت و موجودی اکسل تغییر نمی‌کند و هیچ مقدار نامشخصی حدس زده نمی‌شود.")
+    return "\\n".join(lines)
 
 
 def download_telegram_file(file_id):
