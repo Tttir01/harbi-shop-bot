@@ -197,6 +197,33 @@ def online_price_search(product_name):
                 price = (digits, match.group(2))
         results.append({"title": title[:180], "url": url, "snippet": snippet[:220], "price": price})
 
+    # Public Torob search attempt; no API key is needed for this request.
+    try:
+        torob_response = requests.get(
+            "https://api.torob.com/v4/base-product/search/",
+            params={"q": product_name, "query": product_name, "page": 0, "size": 10},
+            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+            timeout=8,
+        )
+        torob_response.raise_for_status()
+        torob_data = torob_response.json()
+        torob_items = torob_data.get("results", [])
+        for torob_item in torob_items:
+            if not isinstance(torob_item, dict):
+                continue
+            torob_title = torob_item.get("name") or torob_item.get("title")
+            torob_url = torob_item.get("web_client_absolute_url") or torob_item.get("url")
+            if torob_title and torob_url:
+                add(torob_title, torob_url, str(torob_item.get("price_text") or ""))
+            if len(results) >= 3:
+                break
+        if results:
+            log.info("Torob public search returned results for %s", product_name)
+            return results
+    except (requests.RequestException, ValueError, TypeError) as exc:
+        failures += 1
+        log.info("Torob public search unavailable: %s", exc)
+
     # Preferred: authenticated search API. The key is stored only in Render env vars.
     api_key = os.environ.get("SERPAPI_API_KEY", "").strip()
     if api_key:
