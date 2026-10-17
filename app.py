@@ -337,7 +337,7 @@ def online_price_search(product_name):
             candidates = []
             if engine == "bing":
                 for chunk in re.findall(r'<li class="b_algo".*?</li>', html_text, re.I | re.S):
-                    link_match = re.search(r'<h2[^>]*>\\s*<a[^>]+href=["\\']([^"\\']+)["\\'][^>]*>(.*?)</a>', chunk, re.I | re.S)
+                    link_match = re.search(r'<h2[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>', chunk, re.I | re.S)
                     if not link_match:
                         continue
                     link = unescape(link_match.group(1))
@@ -346,16 +346,16 @@ def online_price_search(product_name):
                     snippet = re.sub(r"<[^>]+>", " ", snippet_match.group(1)) if snippet_match else ""
                     candidates.append((title, link, snippet))
             elif engine == "google":
-                for match in re.finditer(r'<a[^>]+href=["\\'](https?://[^"\\']+)["\\'][^>]*>(.*?)</a>', html_text, re.I | re.S):
+                for match in re.finditer(r'<a[^>]+href="(https?://[^"]+)"[^>]*>(.*?)</a>', html_text, re.I | re.S):
                     link = unescape(match.group(1))
                     title = re.sub(r"<[^>]+>", " ", match.group(2))
-                    if len(re.sub(r"\\s+", " ", title).strip()) < 8:
+                    if len(re.sub(r"\s+", " ", title).strip()) < 8:
                         continue
                     # Google often includes navigation links; add() will reject non-product paths/domains.
                     candidates.append((title, link, ""))
             for title, link, snippet in candidates:
-                title = re.sub(r"\\s+", " ", unescape(title)).strip()
-                snippet = re.sub(r"\\s+", " ", unescape(snippet)).strip()
+                title = re.sub(r"\s+", " ", unescape(title)).strip()
+                snippet = re.sub(r"\s+", " ", unescape(snippet)).strip()
                 add(title, link, snippet)
                 if len(results) >= 5:
                     break
