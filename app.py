@@ -182,10 +182,19 @@ def online_price_search(product_name):
         title = unescape(str(title or "")).strip()
         url = unescape(str(url or "")).strip()
         snippet = unescape(str(snippet or "")).strip()
-        host = urlparse(url).netloc.lower().split(":")[0]
+        parsed_url = urlparse(url)
+        host = parsed_url.netloc.lower().split(":")[0]
+        path = parsed_url.path.lower()
         if host.startswith("www."):
             host = host[4:]
         if not title or not url or url in seen or not any(host == d or host.endswith("." + d) for d in allowed):
+            return
+        # Ignore category/search pages: they do not identify the exact product or its price.
+        if host == "torob.com" and not path.startswith("/p/"):
+            return
+        if host == "digikala.com" and not path.startswith("/product/"):
+            return
+        if host == "emalls.ir" and any(part in path for part in ("/search", "/category", "/browse")):
             return
         seen.add(url)
         match = re.search(r"([0-9۰-۹٠-٩][0-9۰-۹٠-٩,٬.\\s]{1,18})\\s*(تومان|تومن|ریال)", title + " " + snippet, re.IGNORECASE)
