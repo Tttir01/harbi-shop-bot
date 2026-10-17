@@ -166,76 +166,90 @@ def format_value(value):
 
 
 def online_price_search(product_name):
-    """Search public Iranian retail listings; never infer a price from missing data."""
+    """Search two public web search endpoints for Iranian retailer listings."""
     from html import unescape
     from html.parser import HTMLParser
+    from urllib.parse import urlparse
+    import xml.etree.ElementTree as ET
 
-    class ResultParser(HTMLParser):
-        def __init__(self):
-            super().__init__()
-            self.results = []
-            self.current = None
-            self.capture = None
+    allowed = ("torob.com", "emalls.ir", "digikala.com")
+    query = f'"{product_name}" قیمت تومان site:torob.com OR site:emalls.ir OR site:digikala.com'
+    results = []
+    seen = set()
+    failures = 0
 
-        def handle_starttag(self, tag, attrs):
-            attrs = dict(attrs)
-            classes = attrs.get("class", "").split()
-            if tag == "a" and "result__a" in classes:
-                self.current = {"title": "", "url": attrs.get("href", ""), "snippet": ""}
-                self.capture = "title"
-            elif self.current is not None and tag in ("a", "div", "span") and "result__snippet" in classes:
-                self.capture = "snippet"
+    def add(title, url, snippet=""):
+        title = unescape(str(title or "")).strip()
+        url = unescape(str(url or "")).strip()
+        snippet = unescape(str(snippet or "")).strip()
+        host = urlparse(url).netloc.lower().split(":")[0]
+        if host.startswith("www."):
+            host = host[4:]
+        if not title or not url or url in seen or not any(host == d or host.endswith("." + d) for d in allowed):
+            return
+        seen.add(url)
+        match = re.search(r"([0-9۰-۹٠-٩][0-9۰-۹٠-٩,٬.\\s]{1,18})\\s*(تومان|تومن|ریال)", title + " " + snippet, re.IGNORECASE)
+        price = None
+        if match:
+            digits = re.sub(r"[^0-9۰-۹٠-٩]", "", match.group(1))
+            digits = digits.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
+            if digits:
+                price = (digits, match.group(2))
+        results.append({"title": title[:180], "url": url, "snippet": snippet[:220], "price": price})
 
-        def handle_data(self, data):
-            if self.current is not None and self.capture in ("title", "snippet"):
-                key = self.capture
-                self.current[key] = (self.current.get(key, "") + " " + data).strip()
-
-        def handle_endtag(self, tag):
-            if tag == "a" and self.capture == "title" and self.current is not None:
-                self.results.append(self.current)
-                self.current = None
-                self.capture = None
-            elif tag in ("div", "span") and self.capture == "snippet":
-                self.capture = None
-
-    query = f'"{product_name}" قیمت تومان (site:torob.com OR site:emalls.ir OR site:digikala.com)'
     try:
-        response = requests.get(
-            "https://html.duckduckgo.com/html/",
-            params={"q": query},
-            headers={"User-Agent": "Mozilla/5.0 (compatible; HarbiShopPriceLookup/1.0)"},
-            timeout=8,
-        )
+        response = requests.get("https://www.bing.com/search", params={"format": "rss", "q": query},
+            headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         response.raise_for_status()
-        parser = ResultParser()
-        parser.feed(response.text)
-        results = []
-        seen = set()
-        for item in parser.results:
-            url = unescape(item.get("url", "")).strip()
-            title = unescape(item.get("title", "")).strip()
-            snippet = unescape(item.get("snippet", "")).strip()
-            if not url or not title or url in seen:
-                continue
-            seen.add(url)
-            if not any(domain in url.lower() for domain in ("torob.com", "emalls.ir", "digikala.com")):
-                continue
-            match = re.search(r"([0-9۰-۹٠-٩][0-9۰-۹٠-٩,٬.\s]{1,18})\s*(تومان|تومن|ریال)", f"{title} {snippet}", re.IGNORECASE)
-            price = None
-            if match:
-                digits = re.sub(r"[^0-9۰-۹٠-٩]", "", match.group(1))
-                digits = digits.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789"))
-                if digits:
-                    price = (digits, match.group(2))
-            results.append({"title": title[:180], "url": url, "snippet": snippet[:220], "price": price})
+        root = ET.fromstring(response.content)
+        for item in root.findall(".//item"):
+            add(item.findtext("title"), item.findtext("link"), item.findtext("description"))
             if len(results) >= 3:
                 break
-        return results
-    except (requests.RequestException, ValueError) as exc:
-        log.info("Online price search unavailable: %s", exc)
-        return None
+    except (requests.RequestException, ET.ParseError, ValueError) as exc:
+        failures += 1
+        log.info("Bing price search unavailable: %s", exc)
 
+    if not results:
+        class Parser(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.items = []
+                self.current = None
+                self.capture = None
+            def handle_starttag(self, tag, attrs):
+                attrs = dict(attrs)
+                classes = attrs.get("class", "").split()
+                if tag == "a" and "result__a" in classes:
+                    self.current = {"title": "", "url": attrs.get("href", ""), "snippet": ""}
+                    self.capture = "title"
+                elif self.current is not None and "result__snippet" in classes:
+                    self.capture = "snippet"
+            def handle_data(self, data):
+                if self.current is not None and self.capture:
+                    self.current[self.capture] = (self.current.get(self.capture, "") + " " + data).strip()
+            def handle_endtag(self, tag):
+                if tag == "a" and self.capture == "title" and self.current is not None:
+                    self.items.append(self.current)
+                    self.current = None
+                    self.capture = None
+                elif tag in ("div", "span") and self.capture == "snippet":
+                    self.capture = None
+        try:
+            response = requests.get("https://html.duckduckgo.com/html/", params={"q": query},
+                headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+            response.raise_for_status()
+            parser = Parser()
+            parser.feed(response.text)
+            for item in parser.items:
+                add(item.get("title"), item.get("url"), item.get("snippet"))
+                if len(results) >= 3:
+                    break
+        except (requests.RequestException, ValueError) as exc:
+            failures += 1
+            log.info("DuckDuckGo price search unavailable: %s", exc)
+
+    return None if not results and failures == 2 else results
 
 def product_reply(query):
     if not PRODUCTS:
