@@ -323,6 +323,55 @@ def online_price_search(product_name):
             failures += 1
             log.warning("SerpApi price search unavailable: %s", exc)
 
+    # Public HTML search fallbacks (no API key). Keep only direct product pages on approved Iranian retailers.
+    def search_html_page(url, params, engine):
+        try:
+            response = requests.get(
+                url, params=params,
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+                         "Accept": "text/html,application/xhtml+xml"},
+                timeout=12,
+            )
+            response.raise_for_status()
+            html_text = response.text
+            candidates = []
+            if engine == "bing":
+                for chunk in re.findall(r'<li class="b_algo".*?</li>', html_text, re.I | re.S):
+                    link_match = re.search(r'<h2[^>]*>\\s*<a[^>]+href=["\\']([^"\\']+)["\\'][^>]*>(.*?)</a>', chunk, re.I | re.S)
+                    if not link_match:
+                        continue
+                    link = unescape(link_match.group(1))
+                    title = re.sub(r"<[^>]+>", " ", link_match.group(2))
+                    snippet_match = re.search(r'<p[^>]*>(.*?)</p>', chunk, re.I | re.S)
+                    snippet = re.sub(r"<[^>]+>", " ", snippet_match.group(1)) if snippet_match else ""
+                    candidates.append((title, link, snippet))
+            elif engine == "google":
+                for match in re.finditer(r'<a[^>]+href=["\\'](https?://[^"\\']+)["\\'][^>]*>(.*?)</a>', html_text, re.I | re.S):
+                    link = unescape(match.group(1))
+                    title = re.sub(r"<[^>]+>", " ", match.group(2))
+                    if len(re.sub(r"\\s+", " ", title).strip()) < 8:
+                        continue
+                    # Google often includes navigation links; add() will reject non-product paths/domains.
+                    candidates.append((title, link, ""))
+            for title, link, snippet in candidates:
+                title = re.sub(r"\\s+", " ", unescape(title)).strip()
+                snippet = re.sub(r"\\s+", " ", unescape(snippet)).strip()
+                add(title, link, snippet)
+                if len(results) >= 5:
+                    break
+            log.info("%s HTML search yielded %s product-page candidates for %s", engine, len(results), product_name)
+        except (requests.RequestException, ValueError, TypeError) as exc:
+            log.info("%s HTML search unavailable: %s", engine, exc)
+
+    # First try public HTML search, which can expose indexed retailer product pages.
+    search_html_page("https://www.bing.com/search", {"q": query, "count": 10, "setlang": "fa"}, "bing")
+    if not any(item["price"] for item in results):
+        search_html_page("https://www.google.com/search", {"q": query, "num": 10, "hl": "fa", "gl": "ir"}, "google")
+    if results:
+        priced = [item for item in results if item["price"]]
+        # Prefer verifiable prices; if search snippets have none, retain links but do not invent a price.
+        return priced[:5] if priced else results[:3]
+
     try:
         response = requests.get("https://www.bing.com/search", params={"format": "rss", "q": query},
             headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
