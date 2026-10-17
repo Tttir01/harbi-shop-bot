@@ -238,6 +238,47 @@ def online_price_search(product_name):
         failures += 1
         log.info("Torob public search unavailable: %s", exc)
 
+    # Fallback: DigiKala's public search endpoint. Its prices are returned in rial.
+    try:
+        digikala_response = requests.get(
+            "https://api.digikala.com/v1/search/",
+            params={"q": product_name, "page": 1},
+            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+            timeout=12,
+        )
+        digikala_response.raise_for_status()
+        digikala_payload = digikala_response.json()
+        digikala_data = digikala_payload.get("data", {}) if isinstance(digikala_payload, dict) else {}
+        digikala_products = digikala_data.get("products", []) if isinstance(digikala_data, dict) else []
+        for item in digikala_products:
+            if not isinstance(item, dict):
+                continue
+            title = item.get("title_fa") or item.get("title") or item.get("title_en")
+            raw_url = item.get("url") or ""
+            url = raw_url if str(raw_url).startswith("http") else f"https://www.digikala.com{raw_url}"
+            price_data = item.get("price") or {}
+            raw_price = price_data.get("selling_price") if isinstance(price_data, dict) else None
+            price_text = ""
+            if raw_price not in (None, "", 0, "0"):
+                try:
+                    # DigiKala API prices are in rial; display toman only after conversion.
+                    toman = int(raw_price) // 10
+                    if toman > 0:
+                        price_text = f"{toman} تومان"
+                except (ValueError, TypeError):
+                    pass
+            if title and url and price_text:
+                add(title, url, price_text)
+            if len(results) >= 3:
+                break
+        if results:
+            log.info("DigiKala public search returned %s usable results for %s", len(results), product_name)
+            return results
+        log.info("DigiKala public search returned no usable results for %s", product_name)
+    except (requests.RequestException, ValueError, TypeError) as exc:
+        failures += 1
+        log.info("DigiKala public search unavailable: %s", exc)
+
     # Preferred: authenticated search API. The key is stored only in Render env vars.
     api_key = os.environ.get("SERPAPI_API_KEY", "").strip()
     if api_key:
@@ -350,7 +391,7 @@ def product_reply(query):
     lines.append(f"موجودی ثبت‌شده: {format_value(p['stock'])}" + (f" {p['unit']}" if p['stock'] is not None and p['unit'] is not None else ""))
     if p["buy_price"] is not None:
         lines.append(f"قیمت خرید ثبت‌شده: {format_value(p['buy_price'])} تومان")
-    lines.append("\\n🌐 بررسی قیمت آنلاین از فروشگاه‌های ایرانی:")
+    lines.append("\n🌐 بررسی قیمت آنلاین از فروشگاه‌های ایرانی:")
     online = online_price_search(p["name"])
     if online is None:
         lines.append("جست‌وجوی وب در دسترس نیست؛ قیمت آنلاین نامشخص است.")
@@ -366,7 +407,7 @@ def product_reply(query):
             if item["snippet"]:
                 lines.append(f"  {item['snippet']}")
             lines.append(f"  لینک: {item['url']}")
-    lines.append("\\n⚠️ قیمت آنلاین ممکن است قدیمی یا مربوط به مدل متفاوت باشد. پیش از خرید صفحه فروشنده را بررسی کنید. قیمت و موجودی اکسل تغییر نمی‌کند و هیچ مقدار نامشخصی حدس زده نمی‌شود.")
+    lines.append("\n⚠️ قیمت آنلاین ممکن است قدیمی یا مربوط به مدل متفاوت باشد. پیش از خرید صفحه فروشنده را بررسی کنید. قیمت و موجودی اکسل تغییر نمی‌کند و هیچ مقدار نامشخصی حدس زده نمی‌شود.")
     return "\\n".join(lines)
 
 
