@@ -197,29 +197,43 @@ def online_price_search(product_name):
                 price = (digits, match.group(2))
         results.append({"title": title[:180], "url": url, "snippet": snippet[:220], "price": price})
 
-    # Public Torob search attempt; no API key is needed for this request.
+    # Public Torob catalog search; no API key is required.
     try:
+        from urllib.parse import urljoin
         torob_response = requests.get(
             "https://api.torob.com/v4/base-product/search/",
-            params={"q": product_name, "query": product_name, "page": 0, "size": 10},
-            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
-            timeout=8,
+            params={"q": product_name, "page": 0, "size": 10, "sort": "popularity", "source": "next_desktop"},
+            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json, text/plain, */*"},
+            timeout=12,
         )
         torob_response.raise_for_status()
         torob_data = torob_response.json()
-        torob_items = torob_data.get("results", [])
+        torob_items = torob_data.get("results", []) if isinstance(torob_data, dict) else []
         for torob_item in torob_items:
             if not isinstance(torob_item, dict):
                 continue
-            torob_title = torob_item.get("name") or torob_item.get("title")
+            torob_title = torob_item.get("name1") or torob_item.get("name2") or torob_item.get("name") or torob_item.get("title")
             torob_url = torob_item.get("web_client_absolute_url") or torob_item.get("url")
+            random_key = torob_item.get("random_key")
+            if random_key:
+                torob_url = f"https://torob.com/p/{random_key}/"
+            elif torob_url:
+                torob_url = urljoin("https://torob.com", str(torob_url))
+            raw_price = torob_item.get("price")
+            price_text = torob_item.get("price_text") or ""
+            if raw_price not in (None, "", 0, "0"):
+                try:
+                    price_text = f"{int(raw_price):,} تومان"
+                except (ValueError, TypeError):
+                    pass
             if torob_title and torob_url:
-                add(torob_title, torob_url, str(torob_item.get("price_text") or ""))
+                add(torob_title, torob_url, str(price_text))
             if len(results) >= 3:
                 break
         if results:
-            log.info("Torob public search returned results for %s", product_name)
+            log.info("Torob public search returned %s usable results for %s", len(results), product_name)
             return results
+        log.info("Torob public search returned no usable results for %s", product_name)
     except (requests.RequestException, ValueError, TypeError) as exc:
         failures += 1
         log.info("Torob public search unavailable: %s", exc)
