@@ -474,6 +474,28 @@ def online_price_search(product_name):
 
     return None if not results and failures >= (3 if api_key else 2) else results
 
+def direct_store_search_links(product_name):
+    """Return free direct search links; these are search pages, not claimed price results."""
+    from urllib.parse import quote_plus
+
+    q = quote_plus(product_name)
+    return [
+        ("ترب", f"https://torob.com/search/?query={q}"),
+        ("ایمالز", f"https://emalls.ir/Search.aspx?Search={q}"),
+        ("دیجی‌کالا", f"https://www.digikala.com/search/?q={q}"),
+        ("کودک‌آموز", f"https://kodakamoz.com/?s={q}&post_type=product"),
+        ("تحریرگستر", f"https://tahrirgostar.com/?s={q}"),
+        ("رزونی", f"https://rezoni.ir/?s={q}"),
+        ("کالا۳۵", f"https://kala35.com/?s={q}"),
+    ]
+
+
+def append_direct_search_links(lines, product_name):
+    lines.append("لینک‌های جست‌وجوی مستقیم (رایگان؛ قیمت تا زمان بررسی صفحه فروشنده تأیید نشده است):")
+    for store_name, url in direct_store_search_links(product_name):
+        lines.append(f"• {store_name}: {url}")
+
+
 def product_reply(query):
     if not PRODUCTS:
         return (
@@ -510,9 +532,11 @@ def product_reply(query):
     lines.append("\n🌐 بررسی قیمت آنلاین از فروشگاه‌های ایرانی:")
     online = online_price_search(p["name"])
     if online is None:
-        lines.append("جست‌وجوی وب در دسترس نیست؛ قیمت آنلاین نامشخص است.")
+        lines.append("جست‌وجوی خودکار وب در دسترس نبود؛ قیمت آنلاین نامشخص است.")
+        append_direct_search_links(lines, p["name"])
     elif not online:
         lines.append("نتیجه قابل استفاده‌ای پیدا نشد؛ قیمت آنلاین نامشخص است.")
+        append_direct_search_links(lines, p["name"])
     else:
         for item in online:
             lines.append(f"• {item['title']}")
