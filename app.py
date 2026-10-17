@@ -166,7 +166,7 @@ def format_value(value):
 
 
 def online_price_search(product_name):
-    """Search two public web search endpoints for Iranian retailer listings."""
+    """Search an API first, then public search endpoints; never invent prices."""
     from html import unescape
     from html.parser import HTMLParser
     from urllib.parse import urlparse
@@ -196,6 +196,31 @@ def online_price_search(product_name):
             if digits:
                 price = (digits, match.group(2))
         results.append({"title": title[:180], "url": url, "snippet": snippet[:220], "price": price})
+
+    # Preferred: authenticated search API. The key is stored only in Render env vars.
+    api_key = os.environ.get("SERPAPI_API_KEY", "").strip()
+    if api_key:
+        try:
+            response = requests.get(
+                "https://serpapi.com/search.json",
+                params={"engine": "google", "q": query, "api_key": api_key, "num": 10, "hl": "fa", "gl": "ir"},
+                headers={"User-Agent": "HarbiShopBot/1.0"},
+                timeout=15,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if payload.get("error"):
+                raise ValueError(str(payload["error"])[:180])
+            for item in payload.get("organic_results", []):
+                add(item.get("title"), item.get("link"), item.get("snippet"))
+                if len(results) >= 3:
+                    break
+            if results:
+                return results
+            log.info("SerpApi returned no matching Iranian retailer results for %s", product_name)
+        except (requests.RequestException, ValueError) as exc:
+            failures += 1
+            log.warning("SerpApi price search unavailable: %s", exc)
 
     try:
         response = requests.get("https://www.bing.com/search", params={"format": "rss", "q": query},
@@ -249,7 +274,7 @@ def online_price_search(product_name):
             failures += 1
             log.info("DuckDuckGo price search unavailable: %s", exc)
 
-    return None if not results and failures == 2 else results
+    return None if not results and failures >= (3 if api_key else 2) else results
 
 def product_reply(query):
     if not PRODUCTS:
