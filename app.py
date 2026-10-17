@@ -259,18 +259,28 @@ def online_price_search(product_name):
         digikala_payload = digikala_response.json()
         digikala_data = digikala_payload.get("data", {}) if isinstance(digikala_payload, dict) else {}
         digikala_products = digikala_data.get("products", []) if isinstance(digikala_data, dict) else []
+        if not isinstance(digikala_products, list):
+            digikala_products = []
         for item in digikala_products:
             if not isinstance(item, dict):
                 continue
-            title = item.get("title_fa") or item.get("title") or item.get("title_en")
-            raw_url = item.get("url") or ""
-            url = raw_url if str(raw_url).startswith("http") else f"https://www.digikala.com{raw_url}"
+            title = item.get("title_fa") or item.get("title") or item.get("title_en") or item.get("name")
+            raw_url = item.get("url") or item.get("web_url") or ""
+            product_id = item.get("id") or item.get("product_id")
+            if not raw_url and product_id:
+                raw_url = f"/product/dkp-{product_id}/"
+            url = raw_url if str(raw_url).startswith("http") else (f"https://www.digikala.com{raw_url}" if raw_url else "")
             price_data = item.get("price") or {}
-            raw_price = price_data.get("selling_price") if isinstance(price_data, dict) else None
+            default_variant = item.get("default_variant") or item.get("defaultVariant") or {}
+            variant_price = default_variant.get("price") or {} if isinstance(default_variant, dict) else {}
+            raw_price = price_data.get("selling_price") or price_data.get("selling_price_rial") if isinstance(price_data, dict) else None
+            if raw_price in (None, "", 0, "0") and isinstance(variant_price, dict):
+                raw_price = variant_price.get("selling_price") or variant_price.get("selling_price_rial")
+            if raw_price in (None, "", 0, "0"):
+                raw_price = item.get("selling_price_rial") or item.get("selling_price")
             price_text = ""
             if raw_price not in (None, "", 0, "0"):
                 try:
-                    # DigiKala API prices are in rial; display toman only after conversion.
                     toman = int(raw_price) // 10
                     if toman > 0:
                         price_text = f"{toman} تومان"
