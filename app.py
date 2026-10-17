@@ -172,8 +172,9 @@ def online_price_search(product_name):
     from urllib.parse import urlparse
     import xml.etree.ElementTree as ET
 
-    allowed = ("torob.com", "emalls.ir", "digikala.com")
-    query = f"{product_name} قیمت تومان ترب ایمالز دیجی‌کالا"
+    # Search engine results may point to smaller Iranian stationery retailers, not only aggregators.
+    allowed = ("torob.com", "emalls.ir", "digikala.com", "kodakamoz.com", "tahrirgostar.com", "rezoni.ir", "ketabane.org", "paytakhteketab.com", "kala35.com", "tedadbala.com", "edariara.com")
+    query = f'"{product_name}" قیمت تومان خرید فروشگاه لوازم التحریر ایران'
     results = []
     seen = set()
     failures = 0
