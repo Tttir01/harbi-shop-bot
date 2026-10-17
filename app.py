@@ -173,7 +173,7 @@ def online_price_search(product_name):
     import xml.etree.ElementTree as ET
 
     allowed = ("torob.com", "emalls.ir", "digikala.com")
-    query = f'"{product_name}" قیمت تومان site:torob.com OR site:emalls.ir OR site:digikala.com'
+    query = f"{product_name} قیمت تومان ترب ایمالز دیجی‌کالا"
     results = []
     seen = set()
     failures = 0
@@ -328,38 +328,60 @@ def online_price_search(product_name):
         try:
             response = requests.get(
                 url, params=params,
-                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
-                         "Accept": "text/html,application/xhtml+xml"},
-                timeout=12,
+                headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131 Safari/537.36",
+                         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                         "Accept-Language": "fa-IR,fa;q=0.9,en;q=0.7"},
+                timeout=15,
             )
             response.raise_for_status()
             html_text = response.text
             candidates = []
+            log.info("%s search HTTP %s, HTML bytes %s for %s", engine, response.status_code, len(html_text), product_name)
+
             if engine == "bing":
-                for chunk in re.findall(r'<li class="b_algo".*?</li>', html_text, re.I | re.S):
-                    link_match = re.search(r'<h2[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>', chunk, re.I | re.S)
+                # Bing changes result markup frequently; allow arbitrary attributes and class ordering.
+                chunks = re.findall(
+                    r'<li\b(?=[^>]*\bclass=["\'][^"\']*\bb_algo\b[^"\']*["\'])[^>]*>(.*?)</li>',
+                    html_text, re.I | re.S
+                )
+                for chunk in chunks:
+                    link_match = re.search(
+                        r'<h2\b[^>]*>\s*<a\b[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>',
+                        chunk, re.I | re.S
+                    )
                     if not link_match:
                         continue
                     link = unescape(link_match.group(1))
                     title = re.sub(r"<[^>]+>", " ", link_match.group(2))
-                    snippet_match = re.search(r'<p[^>]*>(.*?)</p>', chunk, re.I | re.S)
+                    snippet_match = re.search(r'<(?:p|div)\b[^>]*class=["\'][^"\']*(?:b_caption|b_snippet)[^"\']*["\'][^>]*>(.*?)</(?:p|div)>', chunk, re.I | re.S)
                     snippet = re.sub(r"<[^>]+>", " ", snippet_match.group(1)) if snippet_match else ""
                     candidates.append((title, link, snippet))
+
             elif engine == "google":
-                for match in re.finditer(r'<a[^>]+href="(https?://[^"]+)"[^>]*>(.*?)</a>', html_text, re.I | re.S):
+                # Google may use absolute links or /url?q=... redirect links.
+                from urllib.parse import parse_qs, urlparse
+                for match in re.finditer(r'<a\b[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', html_text, re.I | re.S):
                     link = unescape(match.group(1))
                     title = re.sub(r"<[^>]+>", " ", match.group(2))
-                    if len(re.sub(r"\s+", " ", title).strip()) < 8:
+                    title = re.sub(r"\s+", " ", unescape(title)).strip()
+                    if len(title) < 8:
                         continue
-                    # Google often includes navigation links; add() will reject non-product paths/domains.
+                    parsed = urlparse(link)
+                    if parsed.path == "/url":
+                        query_values = parse_qs(parsed.query)
+                        link = (query_values.get("q") or query_values.get("url") or [""])[0]
+                    if link.startswith("//"):
+                        link = "https:" + link
                     candidates.append((title, link, ""))
+
+            log.info("%s raw result candidates: %s for %s", engine, len(candidates), product_name)
             for title, link, snippet in candidates:
                 title = re.sub(r"\s+", " ", unescape(title)).strip()
                 snippet = re.sub(r"\s+", " ", unescape(snippet)).strip()
                 add(title, link, snippet)
                 if len(results) >= 5:
                     break
-            log.info("%s HTML search yielded %s product-page candidates for %s", engine, len(results), product_name)
+            log.info("%s HTML search yielded %s approved product-page candidates for %s", engine, len(results), product_name)
         except (requests.RequestException, ValueError, TypeError) as exc:
             log.info("%s HTML search unavailable: %s", engine, exc)
 
