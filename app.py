@@ -169,7 +169,8 @@ def online_price_search(product_name):
     """Search an API first, then public search endpoints; never invent prices."""
     from html import unescape
     from html.parser import HTMLParser
-    from urllib.parse import urlparse
+    from urllib.parse import parse_qs, urlparse
+    import base64
     import xml.etree.ElementTree as ET
 
     # Search engine results may point to smaller Iranian stationery retailers, not only aggregators.
@@ -183,6 +184,30 @@ def online_price_search(product_name):
         title = unescape(str(title or "")).strip()
         url = unescape(str(url or "")).strip()
         snippet = unescape(str(snippet or "")).strip()
+        # Unwrap search-engine redirect links before checking the retailer domain.
+        for _ in range(2):
+            parsed_redirect = urlparse(url)
+            redirect_host = parsed_redirect.netloc.lower().split(":")[0]
+            redirect_path = parsed_redirect.path.lower()
+            redirect_params = parse_qs(parsed_redirect.query)
+            target = None
+            if redirect_host.endswith("bing.com"):
+                target = (redirect_params.get("url") or redirect_params.get("q") or [None])[0]
+                if not target:
+                    encoded = (redirect_params.get("u") or [None])[0]
+                    if encoded and encoded.startswith("a1"):
+                        try:
+                            token = encoded[2:]
+                            token += "=" * (-len(token) % 4)
+                            target = base64.urlsafe_b64decode(token).decode("utf-8", "ignore")
+                        except (ValueError, UnicodeError):
+                            target = None
+            elif redirect_host.endswith("google.com") and redirect_path == "/url":
+                target = (redirect_params.get("q") or redirect_params.get("url") or [None])[0]
+            if target and target.startswith("http"):
+                url = target
+            else:
+                break
         parsed_url = urlparse(url)
         host = parsed_url.netloc.lower().split(":")[0]
         path = parsed_url.path.lower()
