@@ -1,0 +1,47 @@
+# Base44 sandbox/dev stack for the Harbi Telegram bot (Flask + gunicorn).
+#
+# Runs the app from the cloned source with a live-reloading gunicorn so edits
+# under the repo root are picked up without an image rebuild. The public web
+# entry point is host port 3000 (the preview port).
+#
+# Credentials: placeholders live in ./.env.base44-defaults (committed), and the
+# platform-managed real values are delivered at /run/base44/app.env, listed
+# LAST so a value set in the Base44 dashboard always wins.
+services:
+  web:
+    image: python:3.12-slim
+    working_dir: /app
+    command:
+      - sh
+      - -ec
+      - >-
+        pip install --disable-pip-version-check -q -r requirements.txt &&
+        exec gunicorn app:app --bind 0.0.0.0:3000 --workers 1 --reload
+        --access-logfile - --error-logfile -
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./:/app
+    env_file:
+      - ./.env.base44-defaults
+      - /run/base44/app.env
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      # /health is an existing read-only route; urllib is used because the slim
+      # image has no curl/wget.
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/health', timeout=5).read()"
+      interval: 15s
+      timeout: 8s
+      retries: 5
+      start_period: 120s
+    restart: on-failure
+    labels:
+      base44.project: "Harbi Shop Bot"
+      base44.kind: "web"
+      base44.port: "3000"
